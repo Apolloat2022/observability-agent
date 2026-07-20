@@ -86,12 +86,36 @@ class RingBufferSink:
         span.end(end_time=end_ns)
 
 
+class FanOutSink:
+    """Composes multiple EventSink implementations behind one `emit()` --
+    e.g. RingBufferSink (-> Tempo) + db.writer.PostgresEventWriter (-> Neon),
+    so telemetry lands in both destinations from a single call site
+    (middleware.py / gateway.py / graph.py never need to know how many
+    sinks are actually wired)."""
+
+    def __init__(self, *sinks: Any) -> None:
+        self._sinks = sinks
+
+    def emit(self, event: dict[str, Any]) -> None:
+        for s in self._sinks:
+            s.emit(dict(event))  # each sink may mutate/pop keys during drain
+
+    async def drain(self) -> int:
+        total = 0
+        for s in self._sinks:
+            total += await s.drain()
+        return total
+
+
 async def run_drain_loop(
-    sink: RingBufferSink, *, interval_s: float = 2.0, stop: asyncio.Event | None = None
+    sink: Any, *, interval_s: float = 2.0, stop: asyncio.Event | None = None
 ) -> None:
     """Background task: call sink.drain() on an interval. Wire into the app's
     FastAPI `lifespan` as `asyncio.create_task(run_drain_loop(sink, stop=stop_event))`;
-    set `stop_event` and await the task on shutdown so the final batch flushes."""
+    set `stop_event` and await the task on shutdown so the final batch flushes.
+    Accepts any EventSink-shaped object (RingBufferSink, PostgresEventWriter,
+    FanOutSink, ...) -- typed as `Any` rather than the Protocol to avoid an
+    import cycle with interfaces.py, which itself references sink-shaped types."""
     while stop is None or not stop.is_set():
         await sink.drain()
         await asyncio.sleep(interval_s)
