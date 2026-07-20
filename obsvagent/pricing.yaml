@@ -1,0 +1,23 @@
+# LLM pricing table (USD per 1M tokens). Opus seeds this; Sonnet builds the
+# cost calculator (cost.py) and keeps entries current.
+#
+# effective_date lets historical cost stay accurate after a price change:
+# the calculator picks the newest entry whose effective_date <= the call time.
+# VERIFY these numbers against current provider pricing before relying on them
+# for billing — they are seeds, not a source of truth.
+
+anthropic:
+  claude-opus-4-8:
+    - { effective_date: "2026-01-01", input: 15.00, output: 75.00, cache_read: 1.50 }
+  claude-sonnet-5:
+    - { effective_date: "2026-01-01", input: 3.00, output: 15.00, cache_read: 0.30 }
+  claude-haiku-4-5:
+    - { effective_date: "2026-01-01", input: 0.80, output: 4.00, cache_read: 0.08 }
+
+google:
+  gemini-flash:
+    - { effective_date: "2026-01-01", input: 0.30, output: 2.50, cache_read: 0.03 }
+
+deepseek:
+  deepseek-chat:
+    - { effective_date: "2026-01-01", input: 0.27, output: 1.10, cache_read: 0.03 }

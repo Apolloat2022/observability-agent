@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "obsvagent"
+version = "0.1.0"
+description = "Shared observability, RAG-checker, and compliance-audit layer for the Projects ecosystem"
+requires-python = ">=3.11"
+# Contracts stay dependency-free on purpose; pyyaml is the one base dep since
+# cost.py (Phase 0) and the pricing table it reads are used by every later
+# phase. Everything else is added per phase, behind extras, so the hot-path
+# import stays light.
+dependencies = ["pyyaml"]
+
+[project.optional-dependencies]
+otel = ["opentelemetry-sdk", "opentelemetry-exporter-otlp"]
+checker = ["numpy"]              # Tier-1 embedding math (Phase 3)
+db = ["psycopg[binary]"]
+alerting = ["numpy"]            # PSI / KL drift (Phase 6)
+dev = ["pytest", "ruff", "mypy", "types-PyYAML"]
+
+[project.scripts]
+verify-ledger = "obsvagent.cli.verify_ledger:main"   # Sonnet builds this (Phase 5)
+
+[tool.hatch.build.targets.wheel]
+packages = ["obsvagent"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
