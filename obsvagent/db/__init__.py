@@ -1,6 +1,7 @@
 from .dao import AuditDAO, EventDAO, PayloadDAO, TraceDAO
 from .env import get_app_database_url, get_database_url, get_retention_database_url
 from .migrations import apply_migrations
+from .retention import run_retention_job
 from .writer import PostgresEventWriter
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "PayloadDAO",
     "AuditDAO",
     "PostgresEventWriter",
+    "run_retention_job",
 ]
