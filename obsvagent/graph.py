@@ -36,15 +36,19 @@ from .schema import Telemetry, telemetry_reducer
 NodeFn = Callable[[dict], dict]
 
 
-def _state_hash(state: dict) -> str:
+def state_hash(state: dict) -> str:
     """Stable hash of domain state, EXCLUDING `_telemetry` — telemetry grows
     monotonically every step (token/cost sums, node_path), so including it
     would make every visit hash-distinct and defeat Phase 4's
     (node, state_hash) cycle detection, which needs same-domain-state
-    revisits to collide."""
+    revisits to collide. Public — reused by monitoring/guard.py so both
+    modules key cycle detection off an identical hash."""
     domain = {k: v for k, v in state.items() if k != "_telemetry"}
     canonical = json.dumps(domain, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+_state_hash = state_hash  # internal alias kept for readability at call sites below
 
 
 def traced_node(name: str, *, sink: Optional[EventSink] = None) -> Callable[[NodeFn], NodeFn]:
