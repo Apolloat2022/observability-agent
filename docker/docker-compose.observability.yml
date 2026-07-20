@@ -1,0 +1,62 @@
+# Shared observability stack for the Projects ecosystem — ONE Tempo/Prometheus/
+# Grafana instance that every repo's OTLP exporter points at, rather than a
+# redundant copy per repo. Run from this directory:
+#
+#   docker compose -f docker-compose.observability.yml up -d
+#
+# Port pre-check (Phase 1, see HANDOFF.md): Grafana's default host port 3000
+# collides with RAG-LLM-Project-showcase (frontend) and
+# stablecoin-orchestrator-alpha (app) — remapped to 3300 below. Tempo
+# (4317/4318) and Prometheus (9090) were unclaimed across all four target
+# repos at the time of this check.
+#
+# App containers on the SAME docker network reach the collector at
+# `tempo:4317`; from the host (e.g. a repo not yet dockerized) use
+# `localhost:4317`.
+
+services:
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: obsv-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - obsv-tempo-data:/var/tempo
+    ports:
+      - "4317:4317"   # OTLP gRPC — obsvagent's exporter target
+      - "4318:4318"   # OTLP HTTP
+      - "3200:3200"   # Tempo query API (Grafana datasource uses this internally)
+    networks: [observability]
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: obsv-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - obsv-prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [observability]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: obsv-grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - obsv-grafana-data:/var/lib/grafana
+    ports:
+      - "3300:3000"   # remapped — see port pre-check above
+    depends_on: [tempo, prometheus]
+    networks: [observability]
+
+networks:
+  observability:
+    name: obsv-network
+
+volumes:
+  obsv-tempo-data:
+  obsv-prom-data:
+  obsv-grafana-data:
