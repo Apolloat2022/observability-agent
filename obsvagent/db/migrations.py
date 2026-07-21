@@ -68,8 +68,13 @@ _MIGRATIONS: list[Migration] = [
         RETURNS void AS $BODY$
         DECLARE
             partition_name text := 'obsv_events_' || to_char(for_date, 'YYYY_MM_DD');
-            start_ts timestamptz := for_date::timestamptz;
-            end_ts timestamptz := (for_date + 1)::timestamptz;
+            -- Explicit UTC offset, not `for_date::timestamptz` -- that cast
+            -- interprets midnight in the SESSION's timezone, which can
+            -- silently drift from the UTC instant `created_at` (set via
+            -- now()) actually falls on. The caller (db/writer.py) also
+            -- computes `for_date` in UTC, so this must match.
+            start_ts timestamptz := (for_date::text || ' 00:00:00+00')::timestamptz;
+            end_ts timestamptz := ((for_date + 1)::text || ' 00:00:00+00')::timestamptz;
         BEGIN
             IF NOT EXISTS (
                 SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -168,6 +173,33 @@ _MIGRATIONS: list[Migration] = [
         GRANT SELECT, INSERT ON obsv.obsv_audit TO obsv_app;
         REVOKE UPDATE, DELETE, TRUNCATE ON obsv.obsv_audit FROM obsv_app;
         REVOKE ALL ON obsv.obsv_audit FROM obsv_retention;
+        """,
+    ),
+    (
+        "0006_obsv_review_queue",
+        """
+        -- The Checker's human-review queue (blueprint §2.4) -- distinct
+        -- from obsv_audit (the financial-grade compliance LEDGER, §4).
+        -- This is a working queue: reviewer decisions UPDATE rows in place,
+        -- unlike obsv_audit's insert-only immutability.
+        CREATE TABLE IF NOT EXISTS obsv.obsv_review_queue (
+            id text PRIMARY KEY,
+            trace_id text NOT NULL,
+            route text NOT NULL,
+            tenant text,
+            verdict text NOT NULL,                 -- PASS | REVIEW | FAIL
+            unsupported_ratio double precision NOT NULL DEFAULT 0,
+            claims jsonb NOT NULL DEFAULT '[]'::jsonb,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            reviewer_decision text,                 -- confirmed_hallucination | false_positive | fixed_source
+            reviewer_actor text,
+            reviewed_at timestamptz
+        );
+        CREATE INDEX IF NOT EXISTS obsv_review_queue_pending_idx
+            ON obsv.obsv_review_queue (route, created_at) WHERE reviewer_decision IS NULL;
+        CREATE INDEX IF NOT EXISTS obsv_review_queue_trace_id_idx ON obsv.obsv_review_queue (trace_id);
+
+        GRANT SELECT, INSERT, UPDATE ON obsv.obsv_review_queue TO obsv_app;
         """,
     ),
 ]

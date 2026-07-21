@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[otel,checker,db,alerting,dev]"
+        run: pip install -e ".[otel,checker,db,alerting,api,dev]"
 
       - name: Lint
         run: ruff check obsvagent tests
@@ -25,5 +25,30 @@ jobs:
       - name: Type check
         run: mypy obsvagent
 
+      # Live Neon integration tests (tests/integration/) auto-skip when no
+      # DATABASE_URL/OBSV_APP_DATABASE_URL secret is configured -- CI stays
+      # green without DB credentials; wire OBSV_APP_DATABASE_URL as a repo
+      # secret to actually exercise them here.
       - name: Run tests
         run: pytest
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint + build (includes type check)
+        run: npm run build

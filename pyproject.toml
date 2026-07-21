@@ -18,7 +18,8 @@ otel = ["opentelemetry-sdk", "opentelemetry-exporter-otlp"]
 checker = ["numpy"]              # Tier-1 embedding math (Phase 3)
 db = ["psycopg[binary]"]
 alerting = ["numpy"]            # PSI / KL drift (Phase 6)
-dev = ["pytest", "ruff", "mypy", "types-PyYAML"]
+api = ["fastapi", "uvicorn[standard]"]  # Phase 7 read endpoints
+dev = ["pytest", "ruff", "mypy", "types-PyYAML", "httpx"]
 
 [project.scripts]
 verify-ledger = "obsvagent.cli.verify_ledger:main"   # Sonnet builds this (Phase 5)

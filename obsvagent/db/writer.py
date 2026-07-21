@@ -12,8 +12,8 @@ in `_partitions_ensured` so subsequent drains skip the check.
 """
 from __future__ import annotations
 
-import time
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 import psycopg
@@ -61,7 +61,11 @@ class PostgresEventWriter:
         while self._buffer:
             batch.append(self._buffer.popleft())
 
-        today = time.strftime("%Y-%m-%d")
+        # UTC, not local time: `created_at` is a Postgres timestamptz set via
+        # now() (a true UTC instant); computing "today" in local time can
+        # land on the wrong side of the UTC day boundary and insert against
+        # a partition that doesn't cover that row (CheckViolation).
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         async with await psycopg.AsyncConnection.connect(self._dsn) as conn:
             if today not in self._partitions_ensured:
                 async with conn.cursor() as cur:

@@ -7,11 +7,14 @@ connection.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
 
 from ..alerting.baselines import EventRow
+from ..checker.schema import CheckerVerdict
+from ..ids import new_ulid
 from ..ledger import AuditRecord
 from ..schema import Telemetry
 
@@ -184,3 +187,79 @@ class AuditDAO:
                 d["timestamp"] = d.pop("logical_timestamp").isoformat()
                 records.append(AuditRecord(**d))
             return records
+
+
+class ReviewQueueDAO:
+    """The Checker's human-review queue (blueprint §2.4) -- distinct from
+    AuditDAO/obsv_audit, which is the financial-grade compliance LEDGER
+    (§4). This is a working queue: `record_decision` UPDATEs rows in place."""
+
+    @staticmethod
+    def write(
+        conn: psycopg.Connection, *, trace_id: str, route: str, verdict: CheckerVerdict, tenant: str | None = None
+    ) -> str:
+        row_id = new_ulid()
+        claims_json = [
+            {
+                "text": c.text,
+                "cited": c.cited,
+                "grounding": c.grounding.value,
+                "score": c.score,
+                "tier": c.tier,
+                "rationale": c.rationale,
+                "action": c.action.value,
+            }
+            for c in verdict.claims
+        ]
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO obsv.obsv_review_queue
+                    (id, trace_id, route, tenant, verdict, unsupported_ratio, claims)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (row_id, trace_id, route, tenant, verdict.verdict.value, verdict.unsupported_ratio, Jsonb(claims_json)),
+            )
+        conn.commit()
+        return row_id
+
+    @staticmethod
+    def fetch_pending(conn: psycopg.Connection, *, route: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Never selects obsv_payloads.content or any raw prompt/completion
+        text -- claims already carry only the claim text + citation ids,
+        which is what the reviewer needs to judge grounding, not the full
+        raw response."""
+        query = """
+            SELECT id, trace_id, route, tenant, verdict, unsupported_ratio, claims, created_at
+            FROM obsv.obsv_review_queue
+            WHERE reviewer_decision IS NULL
+        """
+        params: tuple[Any, ...] = ()
+        if route is not None:
+            query += " AND route = %s"
+            params = (route,)
+        query += " ORDER BY created_at ASC LIMIT %s"
+        params = params + (limit,)
+
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            assert cur.description is not None  # always set after a SELECT
+            columns = [d.name for d in cur.description]
+            return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+    @staticmethod
+    def record_decision(conn: psycopg.Connection, item_id: str, *, decision: str, actor: str) -> bool:
+        """Returns True if a row was updated. False means the id didn't
+        exist or was already reviewed (idempotent against double-submit)."""
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE obsv.obsv_review_queue
+                SET reviewer_decision = %s, reviewer_actor = %s, reviewed_at = now()
+                WHERE id = %s AND reviewer_decision IS NULL
+                """,
+                (decision, actor, item_id),
+            )
+            updated = cur.rowcount > 0
+        conn.commit()
+        return updated

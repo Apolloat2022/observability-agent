@@ -10,3 +10,11 @@ dist/
 venv/
 .env
 .env.*
+!web/.env.local.example
+
+# Next.js / Node
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+web/*.tsbuildinfo
