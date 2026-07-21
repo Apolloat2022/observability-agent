@@ -21,3 +21,7 @@ google:
 deepseek:
   deepseek-chat:
     - { effective_date: "2026-01-01", input: 0.27, output: 1.10, cache_read: 0.03 }
+
+groq:
+  llama-3.3-70b-versatile:
+    - { effective_date: "2026-01-01", input: 0.59, output: 0.79, cache_read: 0.0 }
