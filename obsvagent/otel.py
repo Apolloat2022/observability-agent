@@ -50,4 +50,9 @@ TRACE_ID_RESPONSE_HEADER: Final = "X-Trace-Id"
 
 # Provider id normalization. Sonnet: the LLMGateway maps raw SDK/system names
 # to these canonical values before setting GEN_AI_SYSTEM.
-PROVIDERS: Final = ("anthropic", "google", "deepseek")
+#
+# "groq" added when wiring the first real app (RAG-LLM-Project-showcase),
+# which calls Groq (Llama 3.3 70B) via langchain-groq -- not one of the three
+# originally-scoped providers. Purely additive; the original three are
+# unchanged.
+PROVIDERS: Final = ("anthropic", "google", "deepseek", "groq")

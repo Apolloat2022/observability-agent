@@ -52,6 +52,25 @@ def test_deepseek_usage_extraction():
     assert telemetry["token_usage"] == {"prompt": 400, "completion": 100}
 
 
+def test_groq_usage_extraction():
+    # Shape matches a REAL langchain_groq.ChatGroq AIMessage response
+    # (verified empirically against a live Groq call while wiring
+    # RAG-LLM-Project-showcase) -- usage_metadata/response_metadata are
+    # plain dicts on the message, not attribute objects like the other
+    # three providers' raw SDK responses.
+    fake_response = SimpleNamespace(
+        usage_metadata={"input_tokens": 41, "output_tokens": 2, "total_tokens": 43},
+        response_metadata={"model_name": "llama-3.3-70b-versatile", "finish_reason": "stop"},
+    )
+    gw = LLMGateway()
+    _, telemetry = gw.call(
+        provider="groq", model="llama-3.3-70b-versatile", request=lambda: fake_response
+    )
+    assert telemetry["token_usage"] == {"prompt": 41, "completion": 2}
+    assert telemetry["model_versions"] == ["llama-3.3-70b-versatile"]
+    assert telemetry["cost_usd"] > 0
+
+
 def test_unknown_provider_raises():
     gw = LLMGateway()
     with pytest.raises(UnknownProviderError):
