@@ -9,9 +9,20 @@ Mirrors sink.py's RingBufferSink shape (bounded deque `emit()`, async
 Day-partitions are created lazily via `obsv.ensure_events_partition()`
 (see db/migrations.py) — at most once per calendar day per process, cached
 in `_partitions_ensured` so subsequent drains skip the check.
+
+`drain()` runs SYNC psycopg inside `asyncio.to_thread`, not
+`psycopg.AsyncConnection` directly. Found while wiring the first real
+consuming app: uvicorn on Windows defaults to `ProactorEventLoop`, which
+psycopg's async mode cannot run under at all (`InterfaceError`) -- the
+background drain task died silently on every call and no event ever
+persisted, with nothing in the app's logs pointing at why (the exception
+was raised inside a fire-and-forget `asyncio.Task` nothing ever awaited).
+Sync-in-a-thread has no such event-loop dependency and works identically on
+every platform.
 """
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -66,18 +77,26 @@ class PostgresEventWriter:
         # land on the wrong side of the UTC day boundary and insert against
         # a partition that doesn't cover that row (CheckViolation).
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        async with await psycopg.AsyncConnection.connect(self._dsn) as conn:
+        rows = [self._to_row(e) for e in batch]
+        await asyncio.to_thread(self._write_sync, today, rows)
+        return len(batch)
+
+    def _write_sync(self, today: str, rows: list[tuple]) -> None:
+        """Runs inside asyncio.to_thread's worker thread -- see module
+        docstring for why this is sync psycopg rather than AsyncConnection.
+        Only ever called sequentially (run_drain_loop awaits each drain()
+        before the next), so mutating `_partitions_ensured` here has no
+        concurrent-access hazard despite running off the event loop thread."""
+        with psycopg.connect(self._dsn) as conn:
             if today not in self._partitions_ensured:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT obsv.ensure_events_partition(%s)", (today,))
-                await conn.commit()
+                with conn.cursor() as cur:
+                    cur.execute("SELECT obsv.ensure_events_partition(%s)", (today,))
+                conn.commit()
                 self._partitions_ensured.add(today)
 
-            rows = [self._to_row(e) for e in batch]
-            async with conn.cursor() as cur:
-                await cur.executemany(_INSERT_SQL, rows)
-            await conn.commit()
-        return len(batch)
+            with conn.cursor() as cur:
+                cur.executemany(_INSERT_SQL, rows)
+            conn.commit()
 
     @staticmethod
     def _to_row(event: dict[str, Any]) -> tuple:

@@ -4,6 +4,7 @@ instance -- burst-emit N events, confirm emit() stayed O(1) throughout (no
 I/O happens until drain()), zero drops, and every row actually persisted."""
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 
@@ -61,3 +62,28 @@ def test_overflow_beyond_maxlen_is_tracked_not_silently_ignored(app_url: str):
     assert writer.dropped_count == 5
     assert writer.depth == 10
     run_async(writer.drain())  # drain what's left so the test cleans up after itself
+
+
+def test_drain_works_under_the_platform_default_event_loop(app_url: str):
+    """Regression test: found while wiring the first real consuming app
+    (RAG-LLM-Project-showcase) -- uvicorn on Windows runs under the
+    platform-DEFAULT event loop (ProactorEventLoop), not the SelectorEventLoop
+    every other test in this file forces via `run_async`. The original
+    AsyncConnection-based drain() raised psycopg.InterfaceError under
+    Proactor, silently killing the background drain task with nothing ever
+    persisting and no visible error (the exception was inside a
+    fire-and-forget asyncio.Task nothing awaited). This test deliberately
+    uses plain `asyncio.run()` -- the TRUE platform default, no loop_factory
+    override -- to prove drain() no longer depends on which loop is active."""
+    marker = f"defaultloop-{uuid.uuid4().hex[:12]}"
+    writer = PostgresEventWriter(app_url)
+    writer.emit({"_span_name": "default.loop.event", "obsv.trace_id": marker})
+
+    drained = asyncio.run(writer.drain())  # NOT run_async -- the real default loop
+    assert drained == 1
+
+    with psycopg.connect(app_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM obsv.obsv_events WHERE trace_id = %s", (marker,))
+            (count,) = cur.fetchone()
+    assert count == 1
