@@ -23,6 +23,19 @@ Gemini and DeepSeek field names are documented provider conventions
 (`usage_metadata.*` / OpenAI-compatible `usage.*`) — cross-check against
 their own SDK docs before wiring a real client; this file only reads
 whatever object comes back from `request()`.
+
+Groq field names verified empirically (not just from docs) against a real
+`langchain_groq.ChatGroq.invoke()` response while wiring RAG-LLM-Project-
+showcase, which calls Groq via LangChain rather than a raw SDK client:
+  response.usage_metadata["input_tokens"]     -- LangChain's standardized
+  response.usage_metadata["output_tokens"]       usage dict (a plain dict,
+                                                  not an object -- unlike the
+                                                  other three readers, which
+                                                  all use attribute access
+                                                  on a raw provider response)
+  response.response_metadata["model_name"]    -- the model that actually
+                                                  served the request
+No cached-token concept for Groq; `cached_tokens` is always 0.
 """
 from __future__ import annotations
 
@@ -83,10 +96,24 @@ def _read_deepseek_usage(response: Any, requested_model: str) -> UsageReading:
     )
 
 
+def _read_groq_usage(response: Any, requested_model: str) -> UsageReading:
+    """Reads a LangChain `AIMessage` (langchain_groq.ChatGroq output), not a
+    raw Groq SDK response -- `usage_metadata` and `response_metadata` are
+    plain dicts on the message object, not nested attribute objects."""
+    usage = response.usage_metadata
+    return UsageReading(
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
+        cached_tokens=0,
+        response_model=response.response_metadata.get("model_name") or requested_model,
+    )
+
+
 _READERS: dict[str, Callable[[Any, str], UsageReading]] = {
     "anthropic": _read_anthropic_usage,
     "google": _read_google_usage,
     "deepseek": _read_deepseek_usage,
+    "groq": _read_groq_usage,
 }
 
 
